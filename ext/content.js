@@ -3,14 +3,17 @@ let keydownHandler, mousedownHandler, mousemoveHandler, mouseupHandler;
 
 function cleanup() {
   if (overlay) {
-    overlay.removeEventListener("keydown", keydownHandler);
-    overlay.removeEventListener("mousedown", mousedownHandler);
-    overlay.removeEventListener("mousemove", mousemoveHandler);
-    overlay.removeEventListener("mouseup", mouseupHandler);
+    if (keydownHandler) overlay.removeEventListener("keydown", keydownHandler);
+    if (mousedownHandler) overlay.removeEventListener("mousedown", mousedownHandler);
+    if (mousemoveHandler) overlay.removeEventListener("mousemove", mousemoveHandler);
+    if (mouseupHandler) overlay.removeEventListener("mouseup", mouseupHandler);
     overlay.remove();
   }
   overlay = box = null;
-  keydownHandler = mousedownHandler = mousemoveHandler = mouseupHandler = null;
+  keydownHandler = null;
+  mousedownHandler = null;
+  mousemoveHandler = null;
+  mouseupHandler = null;
   selecting = false;
 }
 
