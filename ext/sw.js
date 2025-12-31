@@ -20,33 +20,48 @@ chrome.action.onClicked.addListener(async () => {
 
 async function runLoop() {
   workerTabId = workerTabId ?? (await chrome.tabs.create({ url: "about:blank", active: true })).id;
+  const currentWorkerTabId = workerTabId;
 
-  while (true) {
-    const next = await apiGetNext();
-    if (next.end) {
-      console.log("End marker received. Stopping.");
-      break;
+  try {
+    while (true) {
+      const next = await apiGetNext();
+      if (next.end) {
+        console.log("End marker received. Stopping.");
+        break;
+      }
+
+      if (!isAllowed(next.url)) {
+        console.warn("Blocked URL (not in allow-list):", next.url);
+        // You can POST an error back to the server here if you want.
+        continue;
+      }
+
+      await navigate(currentWorkerTabId, next.url);
+
+      // Ask user to select a rectangle on the visible area.
+      const rect = await requestUserSelection(currentWorkerTabId);
+
+      // Capture and crop.
+      const dataUrl = await chrome.tabs.captureVisibleTab(undefined, { format: "png" });
+      const blob = await cropDataUrl(dataUrl, rect);
+
+      // Upload.
+      await apiUpload(next, rect, blob);
+
+      console.log("Uploaded:", next.id);
+    }
+  } finally {
+    if (currentWorkerTabId !== null && currentWorkerTabId !== undefined) {
+      try {
+        await chrome.tabs.remove(currentWorkerTabId);
+      } catch (e) {
+        console.warn("Failed to remove worker tab", currentWorkerTabId, e);
+      }
     }
 
-    if (!isAllowed(next.url)) {
-      console.warn("Blocked URL (not in allow-list):", next.url);
-      // You can POST an error back to the server here if you want.
-      continue;
+   if (workerTabId === currentWorkerTabId) {
+      workerTabId = null;
     }
-
-    await navigate(workerTabId, next.url);
-
-    // Ask user to select a rectangle on the visible area.
-    const rect = await requestUserSelection(workerTabId);
-
-    // Capture and crop.
-    const dataUrl = await chrome.tabs.captureVisibleTab(undefined, { format: "png" });
-    const blob = await cropDataUrl(dataUrl, rect);
-
-    // Upload.
-    await apiUpload(next, rect, blob);
-
-    console.log("Uploaded:", next.id);
   }
 }
 
