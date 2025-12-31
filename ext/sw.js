@@ -115,14 +115,20 @@ async function apiUpload(next, rect, blob) {
 
 function navigate(tabId, url) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+
     const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       chrome.tabs.onUpdated.removeListener(listener);
       reject(new Error("Navigation timeout"));
     }, 60000);
 
     function listener(updatedTabId, info) {
+      if (settled) return;
       if (updatedTabId !== tabId) return;
       if (info.status === "complete") {
+        settled = true;
         clearTimeout(timeout);
         chrome.tabs.onUpdated.removeListener(listener);
         setTimeout(resolve, 250); // small settle delay
