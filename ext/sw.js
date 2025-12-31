@@ -177,6 +177,10 @@ async function cropDataUrl(dataUrl, rect) {
   const sw = clamp(rect.w, 1, img.width - sx);
   const sh = clamp(rect.h, 1, img.height - sy);
 
+  if (sw < 5 || sh < 5) {
+    throw new Error("Cropped dimensions too small (minimum 5px required)");
+  }
+
   const canvas = new OffscreenCanvas(sw, sh);
   const ctx = canvas.getContext("2d");
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
