@@ -67,8 +67,30 @@ async function runLoop() {
 
 function isAllowed(url) {
   try {
-    const u = new URL(url);
-    return ALLOW_LIST.some(prefix => url.startsWith(prefix)) && (u.protocol === "http:" || u.protocol === "https:");
+    const urlObj = new URL(url);
+    
+    // Only allow http and https protocols
+    if (urlObj.protocol !== "http:" && urlObj.protocol !== "https:") {
+      return false;
+    }
+    
+    // Check if the URL's origin and path match any allowed entry
+    return ALLOW_LIST.some(allowed => {
+      try {
+        const allowedObj = new URL(allowed);
+        
+        // Compare origins (protocol + hostname + port)
+        if (urlObj.origin !== allowedObj.origin) {
+          return false;
+        }
+        
+        // If the allowed entry has a path, ensure the URL's path starts with it
+        const allowedPath = allowedObj.pathname;
+        return urlObj.pathname.startsWith(allowedPath);
+      } catch {
+        return false;
+      }
+    });
   } catch {
     return false;
   }
