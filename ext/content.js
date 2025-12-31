@@ -6,7 +6,7 @@ function cleanup() {
     if (keydownHandler) overlay.removeEventListener("keydown", keydownHandler);
     if (mousedownHandler) overlay.removeEventListener("mousedown", mousedownHandler);
     if (mousemoveHandler) overlay.removeEventListener("mousemove", mousemoveHandler);
-    if (mouseupHandler) overlay.removeEventListener("mouseup", mouseupHandler);
+    if (mouseupHandler) document.removeEventListener("mouseup", mouseupHandler);
     overlay.remove();
   }
   overlay = null;
@@ -108,7 +108,7 @@ function startSelection() {
     });
   };
 
-  overlay.addEventListener("mouseup", mouseupHandler);
+  document.addEventListener("mouseup", mouseupHandler);
 }
 
 chrome.runtime.onMessage.addListener((msg) => {
