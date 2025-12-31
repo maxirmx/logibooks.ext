@@ -25,24 +25,20 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 /**
- * Simulation job queue: URLs are from an allow-list and served one-by-one.
- * End marker: { end: true }
+ * Simulation job list: URLs are from an allow-list and served in one batch.
  */
 const base = `http://localhost:${PORT}`;
-const queue = [
+const jobs = [
   { id: "job-001", url: `${base}/page1.html` },
   { id: "job-002", url: `${base}/page2.html` },
   { id: "job-003", url: `${base}/page1.html#variant` }
 ];
 
-app.get("/next", (_req, res) => {
-  const item = queue.shift();
-  if (!item) return res.json({ end: true });
-  res.json({ end: false, ...item });
+app.get("/jobs", (_req, res) => {
+  res.json({ jobs });
 });
 
 app.post("/upload", upload.single("image"), (req, res) => {
-  // For debugging: store rect/url/id metadata in a .json next to the image.
   const meta = {
     receivedAt: new Date().toISOString(),
     id: req.body?.id,
@@ -60,7 +56,11 @@ app.post("/upload", upload.single("image"), (req, res) => {
 });
 
 function safeJsonParse(s) {
-  try { return JSON.parse(s); } catch { return null; }
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
 }
 
 app.use(express.static(path.join(__dirname, "public")));
