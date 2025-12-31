@@ -42,3 +42,32 @@ The repository includes a **local simulation server** for development and testin
 cd sim-server
 npm install
 npm start
+```
+
+The server will start on `http://localhost:3000`.
+
+---
+
+## Loading the Chrome extension
+
+1. Open Chrome and navigate to `chrome://extensions`
+2. Enable **Developer mode** (toggle in the top-right corner)
+3. Click **Load unpacked**
+4. Select the `ext/` directory from this repository
+
+The extension will now appear in your extensions list and toolbar.
+
+---
+
+## Using the extension
+
+**Note:** Make sure the simulation server is running before using the extension.
+
+1. **Click the extension icon** in your Chrome toolbar
+2. The extension will:
+   - Open or reuse a worker tab
+   - Navigate to each URL from the `/next` endpoint on the simulation server
+   - Prompt you to drag-select a rectangle on the page
+   - Capture and crop the selected area
+   - Upload the cropped PNG to the server (`sim-server/uploads/`)
+   - Repeat until the server sends an end marker
