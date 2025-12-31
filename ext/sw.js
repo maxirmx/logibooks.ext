@@ -80,12 +80,14 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     const tabId = sender.tab?.id;
     if (tabId == null) return;
     void (async () => {
+      // Capture current visibility state to avoid race conditions
+      const currentVisibility = isUiVisible;
       await syncUiState(tabId);
-      // Send current visibility state to the newly loaded content script
+      // Send captured visibility state to the newly loaded content script
       try {
         await chrome.tabs.sendMessage(tabId, { 
           type: "TOGGLE_UI", 
-          visible: isUiVisible 
+          visible: currentVisibility 
         });
       } catch (error) {
         // Content script may not be ready yet
@@ -96,19 +98,19 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg.type === "HIDE_UI") {
     void (async () => {
       await saveUiVisibility(false);
-      await broadcastUiVisibility();
+      await broadcastUiVisibility(false);
     })();
   }
 });
 
-async function broadcastUiVisibility() {
+async function broadcastUiVisibility(visible) {
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
     if (!tab.id) continue;
     try {
       await chrome.tabs.sendMessage(tab.id, { 
         type: "TOGGLE_UI", 
-        visible: isUiVisible 
+        visible: visible 
       });
     } catch (error) {
       // Tab may not have content script loaded
