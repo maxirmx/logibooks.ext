@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Rectangle Capture Job Runner (Sim)",
+  "version": "0.1.0",
+  "permissions": ["tabs", "activeTab", "scripting"],
+  "host_permissions": ["http://localhost:5177/*"],
+  "background": { "service_worker": "sw.js", "type": "module" },
+  "action": { "default_title": "Start job loop (sim)" },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:5177/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
