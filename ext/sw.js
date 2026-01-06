@@ -12,6 +12,7 @@ const state = {
   tabId: null,
   returnUrl: null,
   targetUrl: null,
+  target: null,
   token: null
 };
 
@@ -25,6 +26,7 @@ async function initializeUiVisibility() {
       isUiVisible = result.isUiVisible;
     }
   } catch {
+    // Ignore storage errors; UI visibility defaults to false
   }
 }
 
@@ -34,6 +36,7 @@ async function saveUiVisibility(visible) {
   try {
     await chrome.storage.local.set({ isUiVisible: visible });
   } catch {
+    // Ignore storage errors; isUiVisible is already updated in memory
   }
 }
 
@@ -54,7 +57,8 @@ chrome.action.onClicked.addListener(async (tab) => {
     } else {
       await chrome.tabs.sendMessage(tab.id, { type: "HIDE_UI" });
     }
-  } catch  {
+  } catch {
+    // Tab may not have content script loaded; ignore messaging errors
   }
 });
 
@@ -101,14 +105,13 @@ async function broadcastUiVisibility() {
     if (!tab.id) continue;
     try {
       await chrome.tabs.sendMessage(tab.id, { type: "HIDE_UI" });
-    } catch  {
-      // Tab may not have content script loaded
+    } catch {
+      // Tab may not have content script loaded; ignore messaging errors
     }
   }
 }
 
 async function handleActivation(tabId, returnUrl, payload) {
-  console.log("handleActivation", returnUrl, payload.url, payload.target);
 
   if (!payload?.url || typeof payload.url !== "string") {
     await reportError(new Error("Ошибка выбора страницы (1)"), tabId);
@@ -177,19 +180,19 @@ async function finishSession() {
   if (tabId !== null && tabId !== undefined && returnUrl) {
     try {
       await navigate(tabId, returnUrl);
-    } catch  {
+    } catch {
+      // Navigation back to returnUrl may fail if tab was closed; ignore errors
     }
   }
 }
 
 async function resetState() {
   state.status = "idle";
+  state.tabId = null;
   state.returnUrl = null;
   state.targetUrl = null;
-  state.uploadPrefix = null;
-  state.key = null;
+  state.target = null;
   state.token = null;
-  state.tabId = null;
 }
 
 async function reportError(error, tabId) {
@@ -202,8 +205,7 @@ async function reportError(error, tabId) {
   state.tabId = null;
   state.returnUrl = null;
   state.targetUrl = null;
-  state.uploadPrefix = null;
-  state.key = null;
+  state.target = null;
   state.token = null;
 }
 

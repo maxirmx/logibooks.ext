@@ -1,91 +1,106 @@
 # logibooks.ext
 
-Chrome extension to support documentation generator
+Расширение Chrome для генератора документации
 
-A Chrome Manifest V3 extension that:
-- navigates to URLs from a server-controlled job queue,
-- asks the user to select a rectangle in the visible viewport,
-- captures and crops the selected area,
-- uploads the resulting image back to the server,
-- repeats until an end marker is received.
+Расширение Chrome Manifest V3, которое:
+- переходит по URL из очереди заданий, управляемой сервером,
+- предлагает пользователю выбрать прямоугольную область в видимой области просмотра,
+- захватывает и обрезает выбранную область,
+- загружает полученное изображение обратно на сервер,
+- повторяет процесс до получения маркера завершения.
 
-The repository includes a **local simulation server** for development and testing.
+Репозиторий включает **локальный сервер симуляции** для разработки и тестирования.
 
 ---
 
-## Components
+## Компоненты
 
-### 1. Chrome Extension (`/ext`)
+### 1. Расширение Chrome (`/ext`)
 - Manifest V3
-- Visible-area capture using `chrome.tabs.captureVisibleTab`
-- User-driven rectangle selection (drag overlay)
-- Cropping via `OffscreenCanvas`
-- Upload via `fetch` + `multipart/form-data`
+- Захват видимой области с использованием `chrome.tabs.captureVisibleTab`
+- Выбор прямоугольной области пользователем (overlay с перетаскиванием)
+- Обрезка через `OffscreenCanvas`
+- Загрузка через `fetch` + `multipart/form-data`
 
-### 2. Simulation Server (`/sim-server`)
+### 2. Сервер симуляции (`/sim-server`)
 - Node.js + Express
-- Serves a queue of URLs from an allow-list
-- Accepts uploaded screenshots
-- Stores images and metadata locally
+- Предоставляет очередь URL из списка разрешённых
+- Принимает загруженные скриншоты
+- Хранит изображения и метаданные локально
 
 ---
 
-## Prerequisites
+## Требования
 
-- Chrome (latest stable)
+- Chrome (последняя стабильная версия)
 - Node.js ≥ 18
 
 ---
 
-## Running the simulation server
+## Запуск сервера симуляции
 
 ```bash
 cd sim-server
 npm install
- # Logibooks — Techdoc helper (обновлённый)
+npm start
+```
 
- Этот репозиторий содержит расширение браузера, которое помогает делать скриншоты выбранной области страницы и загружать их на целевой endpoint.
+Сервер будет:
+- Слушать на `http://localhost:5177` по умолчанию
+- Предоставлять endpoint `/jobs`, возвращающий следующий URL для посещения
+- Принимать загрузки на `/upload/:key`
 
- **Коротко:**
- - UI и интеграция со страницей реализованы в content script.
- - Фоновые задачи (навигация вкладки, делать снимок экрана, загрузка) выполняет service worker (`ext/sw.js`).
+---
 
- ## Ключевые файлы
- - Файлы расширения: [ext/manifest.json](ext/manifest.json)
- - UI / взаимодействие со страницей: [ext/ext/content.js](ext/ext/content.js#L1)
- - Фон (service worker): [ext/ext/sw.js](ext/ext/sw.js#L1)
+## Архитектура расширения
 
- ## Архитектура
- - `content.js` отвечает только за DOM/UI (панель, overlay выбора области, кнопки Сохранить/Отменить). Он не содержит бизнес-логики загрузки или доступа к API расширения.
- - `sw.js` (service worker) — единственный источник правды для состояния рабочего процесса (переход, ожидание выбора, загрузка). Он отправляет команды `SHOW_UI`, `HIDE_UI` и `SHOW_ERROR` контент-скрипту.
+### Ключевые файлы
+- Манифест расширения: [ext/manifest.json](ext/manifest.json)
+- UI / взаимодействие со страницей: [ext/content.js](ext/content.js#L1)
+- Фоновая работа (service worker): [ext/sw.js](ext/sw.js#L1)
 
- ## Почему service worker обязателен
- - API вроде `chrome.tabs.captureVisibleTab`, `chrome.tabs.update` и другие доступны только в фоновом контексте расширения. Их нельзя выполнять из content script.
+### Дизайн
+- `content.js` отвечает только за DOM/UI (панель, overlay выбора области, кнопки Сохранить/Отменить). Он не содержит бизнес-логики загрузки или прямого доступа к API расширения.
+- `sw.js` (service worker) — единственный источник истины для состояния рабочего процесса (навигация, ожидание выбора, загрузка). Он отправляет команды `SHOW_UI`, `HIDE_UI` и `SHOW_ERROR` в content script.
 
- ## Установка (локально, developer mode)
- 1. Откройте Chromium/Chrome/Edge.
- 2. Откройте `chrome://extensions` (или `edge://extensions`).
- 3. Включите "Режим разработчика".
- 4. Нажмите "Загрузить распакованное расширение" и укажите папку `ext` (путь к папке с `manifest.json`).
+### Почему необходим service worker
+- API вроде `chrome.tabs.captureVisibleTab`, `chrome.tabs.update` и другие доступны только в фоновом контексте расширения. Их нельзя вызывать из content script.
 
- ## Быстрая проверка
- - После загрузки нажмите на иконку расширения или используйте механизм активации со страницы (если есть) — UI появится и предложит выбрать область.
+---
 
- ## Команды для разработки
- (в проекте нет сборщика по умолчанию — файлы уже JS, просто редактируйте в `ext/ext/`)
+## Установка (режим разработчика)
 
- - Запуск (если у вас был локальный симулятор API — `sim-server`):
+1. Откройте Chrome/Chromium/Edge
+2. Перейдите в `chrome://extensions` (или `edge://extensions`)
+3. Включите "Режим разработчика"
+4. Нажмите "Загрузить распакованное расширение" и выберите папку `ext` (папку с файлом `manifest.json`)
 
- ```bash
- # Если нужен dev-сервер (опционально)
- cd sim-server
- npm install
- npm start
- ```
+---
 
- - Перезагрузить расширение (после правок):
+## Быстрый тест
 
- ```bash
- # В Chrome: откройте chrome://extensions и нажмите Reload напротив расширения
- ```
+После загрузки расширения:
+- Нажмите на иконку расширения или используйте механизм активации со страницы (если реализован)
+- Появится UI с предложением выбрать область
+
+---
+
+## Команды для разработки
+
+В проекте нет этапа сборки по умолчанию — файлы представляют собой чистый JS. Просто редактируйте файлы в `ext/`.
+
+### Запуск сервера симуляции (опционально)
+
+```bash
+cd sim-server
+npm install
+npm start
+```
+
+### Перезагрузка расширения после изменений
+
+В Chrome:
+1. Откройте `chrome://extensions`
+2. Нажмите "Обновить" рядом с расширением
+
 

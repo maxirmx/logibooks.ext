@@ -25,7 +25,8 @@ window.addEventListener("message", (event) => {
 
   // Respond to presence queries from the page
   if (payload.type === "LOGIBOOKS_EXTENSION_QUERY") {
-    window.postMessage({ type: "LOGIBOOKS_EXTENSION_ACTIVE", active: true }, "*");
+    const targetOrigin = event.origin || window.location.origin;
+    window.postMessage({ type: "LOGIBOOKS_EXTENSION_ACTIVE", active: true }, targetOrigin);
     return;
   }
 
@@ -52,12 +53,14 @@ window.addEventListener("message", (event) => {
     try {
       new URL(url);
     } catch (e) {
+      // Invalid URL in payload.url; treat as bad input and ignore this activation request
       return;
     }
 
     try {
       new URL(target);
     } catch (e) {
+      // Invalid URL in payload.target; treat as bad input and ignore this activation request
       return;
     }
 
