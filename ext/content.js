@@ -9,7 +9,6 @@ let mousedownHandler;
 let mousemoveHandler;
 let mouseupHandler;
 let panel;
-let startButton;
 let saveButton;
 let cancelButton;
 let statusLabel;
@@ -46,7 +45,7 @@ function ensurePanel() {
     font-family: system-ui, sans-serif;
     font-size: 14px;
     color: #222;
-    display: flex;
+    display: none;
     flex-direction: column;
     gap: 8px;
     min-width: 180px;
@@ -97,14 +96,6 @@ function ensurePanel() {
   statusLabel = document.createElement("div");
   statusLabel.textContent = "Готово";
 
-  startButton = document.createElement("button");
-  startButton.textContent = "Начать";
-  startButton.type = "button";
-  startButton.style.cssText = "padding: 6px 12px;";
-  startButton.addEventListener("click", () => {
-    chrome.runtime.sendMessage({ type: "UI_START" });
-  });
-
   saveButton = document.createElement("button");
   saveButton.textContent = "Сохранить";
   saveButton.type = "button";
@@ -123,7 +114,6 @@ function ensurePanel() {
   });
 
   panel.appendChild(statusLabel);
-  panel.appendChild(startButton);
   panel.appendChild(saveButton);
   panel.appendChild(cancelButton);
   document.documentElement.appendChild(panel);
@@ -136,7 +126,6 @@ function setUiState(state, message) {
 
   if (state === UI_STATE.IDLE) {
     statusLabel.textContent = message || "Готово";
-    startButton.style.display = "inline-flex";
     saveButton.style.display = "none";
     cancelButton.style.display = "none";
     saveButton.disabled = true;
@@ -145,7 +134,6 @@ function setUiState(state, message) {
 
   if (state === UI_STATE.SELECTING) {
     statusLabel.textContent = message || "Выберите область";
-    startButton.style.display = "none";
     saveButton.style.display = "inline-flex";
     cancelButton.style.display = "inline-flex";
     saveButton.disabled = !selectedRect;
@@ -292,3 +280,14 @@ chrome.runtime.onMessage.addListener((msg) => {
 });
 
 chrome.runtime.sendMessage({ type: "UI_READY" });
+
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  const payload = event.data;
+  if (!payload || payload.type !== "LOGIBOOKS_ACTIVATE") return;
+  chrome.runtime.sendMessage({
+    type: "PAGE_ACTIVATE",
+    key: payload.key,
+    url: payload.url
+  });
+});

@@ -1,6 +1,3 @@
-import { getJobAt, normalizeJobsResponse } from "./workflow.js";
-
-const API_BASE = "http://localhost:5177";
 const ALLOW_LIST = [
   "http://localhost:5177/",
   "<all_urls>"
@@ -8,12 +5,14 @@ const ALLOW_LIST = [
 
 const state = {
   status: "idle",
-  jobs: [],
-  index: 0,
-  tabId: null
+  tabId: null,
+  returnUrl: null,
+  targetUrl: null,
+  uploadPrefix: null,
+  key: null
 };
 
-let isUiVisible = true;
+let isUiVisible = false;
 
 // Initialize UI visibility state from storage
 async function initializeUiVisibility() {
@@ -58,11 +57,11 @@ chrome.action.onClicked.addListener(async (tab) => {
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (!msg?.type) return;
 
-  if (msg.type === "UI_START") {
+  if (msg.type === "PAGE_ACTIVATE") {
     if (state.status !== "idle") return;
     const tabId = sender.tab?.id;
     if (tabId == null) return;
-    void startWorkflow(tabId);
+    void handleActivation(tabId, sender.tab?.url, msg);
   }
 
   if (msg.type === "UI_SAVE") {
@@ -73,7 +72,7 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
 
   if (msg.type === "UI_CANCEL") {
     if (sender.tab?.id !== state.tabId) return;
-    void resetState("Готово", true);
+    void handleCancel();
   }
 
   if (msg.type === "UI_READY") {
@@ -116,66 +115,86 @@ async function broadcastUiVisibility() {
   }
 }
 
-async function startWorkflow(tabId) {
-  state.status = "fetching";
+async function handleActivation(tabId, returnUrl, payload) {
+  if (!payload?.url || typeof payload.url !== "string") {
+    await reportError(new Error("Invalid activation url"), tabId);
+    return;
+  }
+  if (!payload?.key || typeof payload.key !== "string") {
+    await reportError(new Error("Invalid activation key"), tabId);
+    return;
+  }
+  if (!returnUrl) {
+    await reportError(new Error("Missing return url"), tabId);
+    return;
+  }
+  if (!isAllowed(payload.url)) {
+    await reportError(new Error(`URL не разрешен: ${payload.url}`), tabId);
+    return;
+  }
+
+  state.status = "navigating";
   state.tabId = tabId;
-  state.index = 0;
-  state.jobs = [];
+  state.returnUrl = returnUrl;
+  state.targetUrl = payload.url;
+  state.uploadPrefix = payload.url;
+  state.key = payload.key;
 
   try {
-    notifyState(tabId, "idle", "Загрузка списка...");
-    const jobs = normalizeJobsResponse(await apiGetJobs());
-    if (jobs.length === 0) {
-      throw new Error("Нет URL для обработки");
-    }
-    state.jobs = jobs;
-    state.status = "navigating";
-    await processCurrentJob();
+    notifyState(tabId, "idle", "Переход на страницу...");
+    await navigate(tabId, payload.url);
+    await saveUiVisibility(true);
+    await sendMessageWithRetry(tabId, { type: "TOGGLE_UI", visible: true });
+    state.status = "awaiting_selection";
+    await sendMessageWithRetry(tabId, { type: "START_SELECT" });
+    notifyState(tabId, "selecting", "Выберите область и нажмите Сохранить");
   } catch (error) {
     await reportError(error, tabId);
   }
 }
 
-async function processCurrentJob() {
-  const job = getJobAt(state.jobs, state.index);
-  if (!job) {
-    await resetState("Готово", true);
-    return;
-  }
-
-  if (!isAllowed(job.url)) {
-    throw new Error(`URL не разрешен: ${job.url}`);
-  }
-
-  await navigate(state.tabId, job.url);
-  state.status = "awaiting_selection";
-  await sendMessageWithRetry(state.tabId, { type: "START_SELECT" });
-  notifyState(state.tabId, "selecting", "Выберите область и нажмите Сохранить");
-}
-
 async function handleSave(rect) {
   try {
     state.status = "uploading";
-    const job = getJobAt(state.jobs, state.index);
-    if (!job) {
-      throw new Error("Текущее задание не найдено");
+    if (!state.tabId || !state.uploadPrefix || !state.key) {
+      throw new Error("Активная сессия не найдена");
     }
 
     const dataUrl = await chrome.tabs.captureVisibleTab(undefined, { format: "png" });
     const blob = await cropDataUrl(dataUrl, rect);
-    await apiUpload(job, rect, blob);
-
-    state.index += 1;
-    await processCurrentJob();
+    await apiUpload(state.uploadPrefix, state.key, rect, blob);
+    await finishSession("Готово");
   } catch (error) {
     await reportError(error, state.tabId);
   }
 }
 
+async function handleCancel() {
+  await finishSession("Готово");
+}
+
+async function finishSession(message) {
+  const { tabId, returnUrl } = state;
+  await saveUiVisibility(false);
+  if (tabId !== null && tabId !== undefined) {
+    await sendMessageWithRetry(tabId, { type: "TOGGLE_UI", visible: false });
+  }
+  await resetState(message, true);
+  if (tabId !== null && tabId !== undefined && returnUrl) {
+    try {
+      await navigate(tabId, returnUrl);
+    } catch (error) {
+      console.error("Failed to navigate back to return url:", error);
+    }
+  }
+}
+
 async function resetState(message, notify) {
   state.status = "idle";
-  state.jobs = [];
-  state.index = 0;
+  state.returnUrl = null;
+  state.targetUrl = null;
+  state.uploadPrefix = null;
+  state.key = null;
 
   if (notify && state.tabId !== null && state.tabId !== undefined) {
     await sendMessageWithRetry(state.tabId, { type: "RESET_SELECTION", message });
@@ -192,9 +211,11 @@ async function reportError(error, tabId) {
     notifyState(tabId, "idle", message);
   }
   state.status = "idle";
-  state.jobs = [];
-  state.index = 0;
   state.tabId = null;
+  state.returnUrl = null;
+  state.targetUrl = null;
+  state.uploadPrefix = null;
+  state.key = null;
 }
 
 async function syncUiState(tabId) {
@@ -276,21 +297,14 @@ function isAllowed(url) {
   }
 }
 
-async function apiGetJobs() {
-  const r = await fetch(`${API_BASE}/jobs`, { method: "GET" });
-  if (!r.ok) throw new Error(`GET /jobs failed: ${r.status}`);
-  return await r.json();
-}
-
-async function apiUpload(job, rect, blob) {
+async function apiUpload(prefix, key, rect, blob) {
   const fd = new FormData();
-  fd.append("id", job.id);
-  fd.append("url", job.url);
   fd.append("rect", JSON.stringify(rect));
-  fd.append("image", blob, `snap-${job.id}.png`);
+  fd.append("image", blob, `snap-${Date.now()}.png`);
 
-  const r = await fetch(`${API_BASE}/upload`, { method: "POST", body: fd });
-  if (!r.ok) throw new Error(`POST /upload failed: ${r.status}`);
+  const url = `${prefix}${key}`;
+  const r = await fetch(url, { method: "POST", body: fd });
+  if (!r.ok) throw new Error(`POST ${url} failed: ${r.status}`);
 }
 
 function navigate(tabId, url) {
