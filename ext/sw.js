@@ -61,6 +61,8 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     if (state.status !== "idle") return;
     const tabId = sender.tab?.id;
     if (tabId == null) return;
+    // Move state out of "idle" immediately to avoid concurrent activations.
+    state.status = "navigating";
     void handleActivation(tabId, sender.tab?.url, msg);
   }
 
