@@ -285,9 +285,30 @@ window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   const payload = event.data;
   if (!payload || payload.type !== "LOGIBOOKS_ACTIVATE") return;
+
+  const key = typeof payload.key === "string" ? payload.key.trim() : "";
+  const url = typeof payload.url === "string" ? payload.url.trim() : "";
+
+  // Basic validation to avoid forwarding arbitrary or malformed data
+  if (!key || key.length > 256) {
+    return;
+  }
+
+  if (!url || url.length > 2048) {
+    return;
+  }
+
+  try {
+    // Validate URL format; throws if invalid
+    // Using the built-in URL constructor to avoid extra dependencies
+    new URL(url);
+  } catch (e) {
+    return;
+  }
+
   chrome.runtime.sendMessage({
     type: "PAGE_ACTIVATE",
-    key: payload.key,
-    url: payload.url
+    key,
+    url
   });
 });
