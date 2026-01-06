@@ -1,3 +1,7 @@
+// Copyright (C) 2025 Maxim [maxirmx] Samsonov (www.sw.consulting)
+// All rights reserved.
+// This file is a part of Logibooks techdoc helper extension 
+
 const ALLOW_LIST = [
   "http://localhost:5177/",
   "<all_urls>"

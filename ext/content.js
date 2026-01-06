@@ -1,3 +1,7 @@
+// Copyright (C) 2025 Maxim [maxirmx] Samsonov (www.sw.consulting)
+// All rights reserved.
+// This file is a part of Logibooks techdoc helper extension 
+
 let overlay;
 let box;
 let startX;
@@ -13,6 +17,47 @@ let saveButton;
 let cancelButton;
 let statusLabel;
 let closeButton;
+
+// Handle messages from the page for presence queries and activation
+window.addEventListener('message', (event) => {
+  if (!event || event.source !== window || !event.data) return;
+  const payload = event.data;
+
+  // Respond to presence queries from the page
+  if (payload.type === 'LOGIBOOKS_EXTENSION_QUERY') {
+    window.postMessage({ type: 'LOGIBOOKS_EXTENSION_ACTIVE', active: true }, '*');
+    return;
+  }
+
+  // Handle activation messages forwarded to the extension
+  if (payload.type === 'LOGIBOOKS_EXTENSION_ACTIVATE') {
+    console.log('message', event);
+
+    const key = typeof payload.key === "string" ? payload.key.trim() : "";
+    const url = typeof payload.url === "string" ? payload.url.trim() : "";
+
+    // Basic validation to avoid forwarding arbitrary or malformed data
+    if (!key || key.length > 256) {
+      return;
+    }
+
+    if (!url || url.length > 2048) {
+      return;
+    }
+
+    try {
+      new URL(url);
+    } catch (e) {
+      return;
+    }
+
+    chrome.runtime.sendMessage({
+      type: "PAGE_ACTIVATE",
+      key,
+      url
+    });
+  }
+});
 
 const UI_STATE = {
   IDLE: "idle",
@@ -281,34 +326,3 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 chrome.runtime.sendMessage({ type: "UI_READY" });
 
-window.addEventListener("message", (event) => {
-  if (event.source !== window) return;
-  const payload = event.data;
-  if (!payload || payload.type !== "LOGIBOOKS_ACTIVATE") return;
-
-  const key = typeof payload.key === "string" ? payload.key.trim() : "";
-  const url = typeof payload.url === "string" ? payload.url.trim() : "";
-
-  // Basic validation to avoid forwarding arbitrary or malformed data
-  if (!key || key.length > 256) {
-    return;
-  }
-
-  if (!url || url.length > 2048) {
-    return;
-  }
-
-  try {
-    // Validate URL format; throws if invalid
-    // Using the built-in URL constructor to avoid extra dependencies
-    new URL(url);
-  } catch (e) {
-    return;
-  }
-
-  chrome.runtime.sendMessage({
-    type: "PAGE_ACTIVATE",
-    key,
-    url
-  });
-});
