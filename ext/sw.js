@@ -302,7 +302,7 @@ async function apiUpload(prefix, key, rect, blob) {
   fd.append("rect", JSON.stringify(rect));
   fd.append("image", blob, `snap-${Date.now()}.png`);
 
-  const url = `${prefix}${key}`;
+  const url = new URL(key, prefix).toString();
   const r = await fetch(url, { method: "POST", body: fd });
   if (!r.ok) throw new Error(`POST ${url} failed: ${r.status}`);
 }
