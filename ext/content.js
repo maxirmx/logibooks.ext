@@ -34,8 +34,13 @@ window.addEventListener("message", (event) => {
 
     const target = typeof payload.target === "string" ? payload.target.trim() : "";
     const url = typeof payload.url === "string" ? payload.url.trim() : "";
+    const token = typeof payload.token === "string" ? payload.token.trim() : "";
 
     // Basic validation to avoid forwarding arbitrary or malformed data
+    if (!token || token.length > 256) {
+      return;
+    }
+
     if (!target || target.length > 2048) {
       return;
     }
@@ -59,7 +64,8 @@ window.addEventListener("message", (event) => {
     chrome.runtime.sendMessage({
       type: "PAGE_ACTIVATE",
       target,
-      url
+      url,
+      token
     });
   }
 });

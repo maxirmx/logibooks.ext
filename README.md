@@ -42,33 +42,50 @@ The repository includes a **local simulation server** for development and testin
 ```bash
 cd sim-server
 npm install
-npm start
-```
+ # Logibooks — Techdoc helper (обновлённый)
 
-The server will start on `http://localhost:3000`.
+ Этот репозиторий содержит расширение браузера, которое помогает делать скриншоты выбранной области страницы и загружать их на целевой endpoint.
 
----
+ **Коротко:**
+ - UI и интеграция со страницей реализованы в content script.
+ - Фоновые задачи (навигация вкладки, делать снимок экрана, загрузка) выполняет service worker (`ext/sw.js`).
 
-## Loading the Chrome extension
+ ## Ключевые файлы
+ - Файлы расширения: [ext/manifest.json](ext/manifest.json)
+ - UI / взаимодействие со страницей: [ext/ext/content.js](ext/ext/content.js#L1)
+ - Фон (service worker): [ext/ext/sw.js](ext/ext/sw.js#L1)
 
-1. Open Chrome and navigate to `chrome://extensions`
-2. Enable **Developer mode** (toggle in the top-right corner)
-3. Click **Load unpacked**
-4. Select the `ext/` directory from this repository
+ ## Архитектура
+ - `content.js` отвечает только за DOM/UI (панель, overlay выбора области, кнопки Сохранить/Отменить). Он не содержит бизнес-логики загрузки или доступа к API расширения.
+ - `sw.js` (service worker) — единственный источник правды для состояния рабочего процесса (переход, ожидание выбора, загрузка). Он отправляет команды `SHOW_UI`, `HIDE_UI` и `SHOW_ERROR` контент-скрипту.
 
-The extension will now appear in your extensions list and toolbar.
+ ## Почему service worker обязателен
+ - API вроде `chrome.tabs.captureVisibleTab`, `chrome.tabs.update` и другие доступны только в фоновом контексте расширения. Их нельзя выполнять из content script.
 
----
+ ## Установка (локально, developer mode)
+ 1. Откройте Chromium/Chrome/Edge.
+ 2. Откройте `chrome://extensions` (или `edge://extensions`).
+ 3. Включите "Режим разработчика".
+ 4. Нажмите "Загрузить распакованное расширение" и укажите папку `ext` (путь к папке с `manifest.json`).
 
-## Using the extension
+ ## Быстрая проверка
+ - После загрузки нажмите на иконку расширения или используйте механизм активации со страницы (если есть) — UI появится и предложит выбрать область.
 
-**Note:** Make sure the simulation server is running before using the extension.
+ ## Команды для разработки
+ (в проекте нет сборщика по умолчанию — файлы уже JS, просто редактируйте в `ext/ext/`)
 
-1. **Click the extension icon** in your Chrome toolbar
-2. The extension will:
-   - Open or reuse a worker tab
-   - Navigate to each URL from the `/next` endpoint on the simulation server
-   - Prompt you to drag-select a rectangle on the page
-   - Capture and crop the selected area
-   - Upload the cropped PNG to the server (`sim-server/uploads/`)
-   - Repeat until the server sends an end marker
+ - Запуск (если у вас был локальный симулятор API — `sim-server`):
+
+ ```bash
+ # Если нужен dev-сервер (опционально)
+ cd sim-server
+ npm install
+ npm start
+ ```
+
+ - Перезагрузить расширение (после правок):
+
+ ```bash
+ # В Chrome: откройте chrome://extensions и нажмите Reload напротив расширения
+ ```
+

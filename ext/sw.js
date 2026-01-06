@@ -13,7 +13,8 @@ const state = {
   returnUrl: null,
   targetUrl: null,
   uploadPrefix: null,
-  key: null
+  key: null,
+  token: null
 };
 
 let isUiVisible = false;
@@ -133,6 +134,7 @@ async function handleActivation(tabId, returnUrl, payload) {
   state.returnUrl = returnUrl;
   state.targetUrl = payload.url;
   state.target = payload.target;
+  state.token = typeof payload.token === "string" ? payload.token.trim() : null;
 
   try {
     await navigate(tabId, payload.url);
@@ -188,6 +190,7 @@ async function resetState() {
   state.targetUrl = null;
   state.uploadPrefix = null;
   state.key = null;
+  state.token = null;
   state.tabId = null;
 }
 
@@ -271,8 +274,12 @@ async function apiUpload(target, rect, blob) {
   const fd = new FormData();
   fd.append("rect", JSON.stringify(rect));
   fd.append("image", blob, `snap-${Date.now()}.png`);
+  const headers = {};
+  if (state.token) {
+    headers["Authorization"] = `Bearer ${state.token}`;
+  }
 
-  const r = await fetch(target, { method: "POST", body: fd });
+  const r = await fetch(target, { method: "POST", body: fd, headers });
   if (!r.ok) throw new Error(`Ошибка POST ${target}: ${r.status}`);
 }
 
