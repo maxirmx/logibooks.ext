@@ -5,7 +5,7 @@
 export default {
   testEnvironment: "jsdom",
   setupFilesAfterEnv: ["<rootDir>/tests/setup.js"],
-  testMatch: ["<rootDir>/tests/*.test.js"],
+  testMatch: ["<rootDir>/tests/**/*.test.js"],
   collectCoverageFrom: [
     "ext/**/*.js",
     "!ext/node_modules/**",
