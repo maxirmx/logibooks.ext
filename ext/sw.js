@@ -266,20 +266,14 @@ async function resetState() {
 }
 
 async function reportError(error, tabId) {
-  // STATE: any → idle
+  // STATE: any → idle (via resetState)
   // Error occurred, show error message and reset all session data
   console.error(error);
   const message = error instanceof Error ? error.message : "Неизвестная ошибка";
   if (tabId !== null && tabId !== undefined) {
     await sendMessageWithRetry(tabId, { type: "SHOW_ERROR", message });
   }
-  // Reset to idle state directly (not via resetState to avoid duplication)
-  state.status = "idle";
-  state.tabId = null;
-  state.returnUrl = null;
-  state.targetUrl = null;
-  state.target = null;
-  state.token = null;
+  await resetState();  // → idle state
 }
 
 async function syncUiState(tabId) {
