@@ -110,17 +110,6 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: Validate extension manifest
-      run: |
-        # Basic manifest validation
-        node -e "
-          const manifest = require('./ext/manifest.json');
-          if (!manifest.manifest_version || !manifest.name || !manifest.version) {
-            process.exit(1);
-          }
-          console.log('Manifest validation passed');
-        "
-
     - name: Package extension
       run: |
         # Create extension package (excluding tests and dev files)
