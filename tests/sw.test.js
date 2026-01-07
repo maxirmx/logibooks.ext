@@ -63,13 +63,7 @@ describe("Service worker helpers", () => {
 
   it("sendMessageWithRetry retries on failure", async () => {
     let called = 0;
-    global.chrome = {
-      runtime: { lastError: null },
-      tabs: { sendMessage: jest.fn((tabId, message, cb) => { called += 1; cb(); }) },
-      action: { onClicked: { addListener: jest.fn() } }
-    };
-    await import("../ext/sw.js");
-    sw = globalThis.__swTestHooks__;
+    global.chrome.tabs.sendMessage = jest.fn((tabId, message, cb) => { called += 1; cb(); });
     const ok = await sw.sendMessageWithRetry(1, { type: "X" }, 2);
     expect(ok).toBe(true);
     expect(called).toBeGreaterThanOrEqual(1);
@@ -77,8 +71,6 @@ describe("Service worker helpers", () => {
 
   it("apiUpload throws on non-ok response", async () => {
     global.fetch = jest.fn(async () => ({ ok: false, status: 500 }));
-    await import("../ext/sw.js");
-    sw = globalThis.__swTestHooks__;
     await expect(sw.apiUpload("https://api.local/upload", { x: 0, y: 0, w: 10, h: 10 }, new Blob())).rejects.toThrow(
       /Ошибка POST/
     );
