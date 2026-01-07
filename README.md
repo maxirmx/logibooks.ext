@@ -1,4 +1,5 @@
 # Logibooks Techdoc Helper Extension
+[![ci](https://github.com/maxirmx/logibooks.ext/actions/workflows/ci.yml/badge.svg)](https://github.com/maxirmx/logibooks.ext/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/maxirmx/logibooks.ext/graph/badge.svg?token=8LfuBRVDwu)](https://codecov.io/gh/maxirmx/logibooks.ext)
 
 Расширение Chrome для генератора документации
