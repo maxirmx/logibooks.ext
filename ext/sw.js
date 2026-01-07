@@ -395,3 +395,19 @@ async function loadImage(dataUrl) {
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
+
+// Exports for unit testing
+export {
+  isAllowed,
+  clamp,
+  delay,
+  sendMessageWithRetry,
+  sendMessageOnce,
+  loadImage,
+  cropDataUrl,
+  apiUpload,
+  navigate,
+  reportError,
+  resetState,
+  state
+};

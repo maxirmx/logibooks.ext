@@ -1,4 +1,7 @@
-// Test setup file - mocks for Chrome APIs and global setup
+// Copyright (C) 2025 Maxim [maxirmx] Samsonov (www.sw.consulting)
+// All rights reserved.
+// This file is a part of Logibooks techdoc helper extension 
+//
 import { jest } from "@jest/globals";
 
 // Mock Chrome APIs

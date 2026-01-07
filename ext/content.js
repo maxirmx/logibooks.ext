@@ -338,3 +338,13 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 chrome.runtime.sendMessage({ type: "UI_READY" });
 
+// Expose internal helpers for unit testing
+export {
+  togglePanel,
+  ensurePanel,
+  showSelectionUI,
+  showError,
+  cleanupSelection,
+  cleanupOverlay
+};
+
