@@ -300,12 +300,14 @@ function startSelection() {
     // If a previous selection exists and the user presses again, drop
     // the old selection and start a fresh selection from the new point.
     if (selectedRect) {
-      // Remove the persistent selection visuals but keep the panel shown.
+      // Remove the persistent selection visuals.
       cleanupOverlay();
-      // Recreate overlay and box for new selection
-      startSelection();
-      // If startSelection returned early because overlay existed, continue
-      if (!overlay) return;
+      // Restart selection on a clean overlay in a separate tick to avoid
+      // stacking event handlers or recursively re-entering initialization.
+      setTimeout(() => {
+        startSelection();
+      }, 0);
+      return;
     }
 
     selecting = true;
