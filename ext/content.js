@@ -393,8 +393,13 @@ chrome.runtime.onMessage.addListener((msg) => {
 chrome.runtime.sendMessage({ type: "UI_READY" });
 
 // Expose internal helpers for unit testing
-const isTestEnv = typeof globalThis !== "undefined" && globalThis.process?.env?.NODE_ENV === "test";
-if (isTestEnv && typeof globalThis !== "undefined") {
+const isTestEnv =
+  typeof globalThis !== "undefined" &&
+  (
+    globalThis.__CONTENT_TEST_ENV__ === true ||
+    globalThis.process?.env?.NODE_ENV === "test"
+  );
+if (isTestEnv) {
   globalThis.__contentTestHooks__ = {
     togglePanel,
     ensurePanel,
