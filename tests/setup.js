@@ -70,6 +70,9 @@ global.window = {
   devicePixelRatio: 1
 };
 
+// Provide requestAnimationFrame for tests; tests may override this mock
+global.requestAnimationFrame = jest.fn((cb) => cb());
+
 // Mock URL constructor
 global.URL = jest.fn((url) => ({
   href: url,

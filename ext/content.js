@@ -163,18 +163,48 @@ function ensurePanel() {
   saveButton = document.createElement("button");
   saveButton.textContent = "Сохранить";
   saveButton.type = "button";
-  saveButton.style.cssText = "padding: 6px 12px;";
+  saveButton.style.cssText = "padding: 6px 12px; cursor: pointer;";
   saveButton.addEventListener("click", () => {
     if (!selectedRect) return;
-    chrome.runtime.sendMessage({ type: "UI_SAVE", rect: selectedRect });
-    cleanupSelection();
+    const rectToSend = selectedRect;
+    // Hide overlay and panel first so the captured tab image does not
+    // include selection UI artifacts. Use a short timeout to allow the
+    // browser to repaint before the background captures the visible tab.
+    try {
+      cleanupOverlay();
+    } catch (e) {
+      // best-effort
+    }
     togglePanel(false);
+    // Use two animation frames to ensure the browser repaints after we
+    // removed the overlay and hid the panel. This is more reliable than
+    // a fixed short timeout which may be too short on some systems.
+    try {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          try {
+            chrome.runtime.sendMessage({ type: "UI_SAVE", rect: rectToSend });
+          } catch (err) {
+            console.error("Failed to send UI_SAVE message:", err);
+          }
+        });
+      });
+    } catch (rafErr) {
+      // Fallback to timeout in environments without RAF
+      setTimeout(() => {
+        try {
+          chrome.runtime.sendMessage({ type: "UI_SAVE", rect: rectToSend });
+        } catch (err) {
+          console.error("Failed to send UI_SAVE message:", err);
+        }
+      }, 150);
+    }
   });
 
   cancelButton = document.createElement("button");
   cancelButton.textContent = "Отменить";
   cancelButton.type = "button";
-  cancelButton.style.cssText = "padding: 6px 12px;";
+  cancelButton.style.cssText = "padding: 6px 12px; cursor: pointer;";
   cancelButton.addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "UI_CANCEL" });
   });
@@ -182,6 +212,8 @@ function ensurePanel() {
   panel.appendChild(statusLabel);
   panel.appendChild(saveButton);
   panel.appendChild(cancelButton);
+  // Note: reselection is initiated by pressing mouse on the overlay;
+  // no explicit "reselect" button is needed.
   document.documentElement.appendChild(panel);
 }
 
@@ -263,6 +295,17 @@ function startSelection() {
   overlay.addEventListener("keydown", keydownHandler);
 
   mousedownHandler = (e) => {
+    // If a previous selection exists and the user presses again, drop
+    // the old selection and start a fresh selection from the new point.
+    if (selectedRect) {
+      // Remove the persistent selection visuals but keep the panel shown.
+      cleanupOverlay();
+      // Recreate overlay and box for new selection
+      startSelection();
+      // If startSelection returned early because overlay existed, continue
+      if (!overlay) return;
+    }
+
     selecting = true;
     startX = e.clientX;
     startY = e.clientY;
@@ -270,6 +313,9 @@ function startSelection() {
     box.style.top = `${startY}px`;
     box.style.width = "0px";
     box.style.height = "0px";
+    // When starting a new selection, clear previous rect and disable Save
+    selectedRect = null;
+    saveButton.disabled = true;
     e.preventDefault();
   };
 
@@ -319,10 +365,12 @@ function startSelection() {
     // Keep the overlay and selection box visible after mouseup so the user
     // can still see and confirm the selected area before saving.
     // Remove the overlay only when the user cancels or starts a new selection.
-    // Make the box visually persistent (ensure pointer-events are none so it
-    // doesn't block clicks on the panel buttons).
+    // Make the box visually persistent but allow pointer-events through the
+    // selection box so panel buttons remain clickable. Keep the overlay
+    // cursor as crosshair per user's request; panel buttons will show pointer.
     box.style.pointerEvents = "none";
-    overlay.style.cursor = "default";
+    // Ensure overlay remains crosshair (do not change to default)
+    overlay.style.cursor = "crosshair";
   };
 
   document.addEventListener("mouseup", mouseupHandler);
@@ -351,4 +399,34 @@ if (isTestEnv && typeof globalThis !== "undefined") {
     cleanupSelection,
     cleanupOverlay
   };
+
+  // Expose selectedRect accessors for tests
+  if (typeof globalThis.__contentTestHooks__ !== "undefined") {
+    globalThis.__contentTestHooks__.getSelectedRect = () => selectedRect;
+    globalThis.__contentTestHooks__.setSelectedRect = (r) => { selectedRect = r; };
+  }
+
+  // Test helper: trigger save flow (as if user clicked Save)
+  if (typeof globalThis.__contentTestHooks__ !== "undefined") {
+    globalThis.__contentTestHooks__.triggerSave = (rect) => {
+      if (rect) selectedRect = rect;
+      // run the same steps as saveButton click
+      const rectToSend = selectedRect;
+      try { cleanupOverlay(); } catch (e) {}
+      togglePanel(false);
+      try {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            try {
+              chrome.runtime.sendMessage({ type: "UI_SAVE", rect: rectToSend });
+            } catch (err) {}
+          });
+        });
+      } catch (e) {
+        setTimeout(() => {
+          try { chrome.runtime.sendMessage({ type: "UI_SAVE", rect: rectToSend }); } catch (err) {}
+        }, 150);
+      }
+    };
+  }
 }
