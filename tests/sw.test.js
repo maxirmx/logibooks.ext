@@ -63,6 +63,7 @@ describe("Service worker helpers", () => {
 
   it("sendMessageWithRetry retries on failure", async () => {
     let called = 0;
+    global.chrome.runtime.lastError = null;
     global.chrome.tabs.sendMessage = jest.fn((tabId, message, cb) => { called += 1; cb(); });
     const ok = await sw.sendMessageWithRetry(1, { type: "X" }, 2);
     expect(ok).toBe(true);
