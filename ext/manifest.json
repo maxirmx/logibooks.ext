@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Logibooks Techdoc Helper",
+  "name": "Logibooks Techdoc helper",
   "version": "0.1.0",
   "icons": {
     "16": "icons/icon-16.png",
@@ -9,7 +9,7 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "Logibooks Techdoc Helper",
+    "default_title": "Logibooks screenshot helper",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
@@ -18,7 +18,7 @@
     }
   },
   "permissions": ["tabs", "activeTab", "scripting", "storage"],
-  "host_permissions": ["http://localhost:5177/*", "<all_urls>"],
+  "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "sw.js", "type": "module" },
   "content_scripts": [
     {
