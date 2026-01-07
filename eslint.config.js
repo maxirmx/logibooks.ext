@@ -1,3 +1,7 @@
+// Copyright (C) 2025 Maxim [maxirmx] Samsonov (www.sw.consulting)
+// All rights reserved.
+// This file is a part of Logibooks techdoc helper extension 
+
 export default [
   {
     languageOptions: {
@@ -38,7 +42,12 @@ export default [
       globals: {
         describe: "readonly",
         it: "readonly",
-        assert: "readonly"
+        assert: "readonly",
+        global: "writable",
+        expect: "readonly",
+        beforeEach: "readonly",
+        afterEach: "readonly",
+        jest: "readonly"
       }
     }
   },

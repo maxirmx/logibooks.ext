@@ -1,19 +1,48 @@
 // Copyright (C) 2025 Maxim [maxirmx] Samsonov (www.sw.consulting)
 // All rights reserved.
 // This file is a part of Logibooks techdoc helper extension 
+//
+// ARCHITECTURE NOTE: Page-Activated Screenshot Extension
+// =====================================================
+// This extension is designed to be activated by host webpages, NOT by user clicks.
+// The workflow requires persistent storage (via chrome.storage.local) because:
+//
+// 1. Page sends activation message with: target URL + upload endpoint + auth token
+// 2. Extension navigates TO the target URL to capture screenshot
+// 3. UI state must SURVIVE navigation to show screenshot interface on target page
+// 4. Extension uploads screenshot and navigates BACK to original page
+//
+// Without persistent storage, the extension would lose UI state during navigation steps 2-4,
+// making it impossible for the screenshot interface to appear on the target page.
+// This service worker handles the persistent storage (chrome.storage.local) and navigation logic. 
 
 const ALLOW_LIST = [
   "http://localhost:5177/",
   "<all_urls>"
 ];
 
+// STATE MACHINE DOCUMENTATION
+// ===========================
+// Extension state transitions:
+//
+// "idle" → "navigating" → "awaiting_selection" → "uploading" → "idle"
+//                       ↘                      ↙
+//                         "idle" (on cancel/error)
+//
+// State Details:
+// - idle: Ready for new activation, no active session
+// - navigating: Navigating to target URL for screenshot
+// - awaiting_selection: On target page, waiting for user to select area
+// - uploading: Processing and uploading the selected screenshot
+// 
+// All error conditions and cancellations reset to "idle" state
 const state = {
-  status: "idle",
-  tabId: null,
-  returnUrl: null,
-  targetUrl: null,
-  target: null,
-  token: null
+  status: "idle",        // Current state: "idle" | "navigating" | "awaiting_selection" | "uploading"
+  tabId: null,           // Active tab ID for the current session
+  returnUrl: null,       // Original page URL to return to after screenshot
+  targetUrl: null,       // Target page URL where screenshot will be taken
+  target: null,          // Upload endpoint URL
+  token: null            // Authentication token for upload
 };
 
 let isUiVisible = false;
@@ -43,29 +72,14 @@ async function saveUiVisibility(visible) {
 // Initialize on service worker startup
 initializeUiVisibility();
 
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab.id) return;
-  const newVisibility = !isUiVisible;
-  await saveUiVisibility(newVisibility);
-  
-  try {
-    if (newVisibility) {
-      await chrome.tabs.sendMessage(tab.id, { 
-        type: "SHOW_UI", 
-        message: "Выберите область"
-      });
-    } else {
-      await chrome.tabs.sendMessage(tab.id, { type: "HIDE_UI" });
-    }
-  } catch {
-    // Tab may not have content script loaded; ignore messaging errors
-  }
-});
+
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (!msg?.type) return;
 
   if (msg.type === "PAGE_ACTIVATE") {
+    // STATE: idle → navigating
+    // Only accept new activations when idle to prevent concurrent sessions
     if (state.status !== "idle") return;
     const tabId = sender.tab?.id;
     if (tabId == null) return;
@@ -75,12 +89,16 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   }
 
   if (msg.type === "UI_SAVE") {
+    // STATE: awaiting_selection → uploading
+    // Only process save when waiting for selection on the correct tab
     if (state.status !== "awaiting_selection") return;
     if (sender.tab?.id !== state.tabId) return;
     void handleSave(msg.rect);
   }
 
   if (msg.type === "UI_CANCEL") {
+    // STATE: any → idle
+    // Cancel can happen from any state, always return to idle
     if (sender.tab?.id !== state.tabId) return;
     void handleCancel();
   }
@@ -90,26 +108,21 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     if (tabId == null) return;
     void syncUiState(tabId);
   }
-
-  if (msg.type === "HIDE_UI") {
-    void (async () => {
-      await saveUiVisibility(false);
-      await broadcastUiVisibility();
-    })();
-  }
 });
 
-async function broadcastUiVisibility() {
-  const tabs = await chrome.tabs.query({});
-  for (const tab of tabs) {
-    if (!tab.id) continue;
-    try {
-      await chrome.tabs.sendMessage(tab.id, { type: "HIDE_UI" });
-    } catch {
-      // Tab may not have content script loaded; ignore messaging errors
-    }
-  }
+if (chrome?.runtime?.onSuspend?.addListener) {
+  chrome.runtime.onSuspend.addListener(() => {
+    void handleExtensionSuspend();
+  });
 }
+
+if (chrome?.action?.onClicked?.addListener) {
+  chrome.action.onClicked.addListener((tab) => {
+    void handleActionClick(tab);
+  });
+}
+
+
 
 async function handleActivation(tabId, returnUrl, payload) {
 
@@ -152,7 +165,10 @@ async function handleActivation(tabId, returnUrl, payload) {
 
 async function handleSave(rect) {
   try {
+    // STATE: awaiting_selection → uploading
+    // User selected area, now processing and uploading screenshot
     state.status = "uploading";
+    
     if (!state.tabId || !state.target) {
       throw new Error("Активная сессия не найдена");
     }
@@ -160,23 +176,75 @@ async function handleSave(rect) {
     const dataUrl = await chrome.tabs.captureVisibleTab(undefined, { format: "png" });
     const blob = await cropDataUrl(dataUrl, rect);
     await apiUpload(state.target, rect, blob);
+    
+    // STATE: uploading → idle (via finishSession)
     await finishSession();
   } catch (error) {
+    // STATE: uploading → idle (via reportError)
     await reportError(error, state.tabId);
   }
 }
 
 async function handleCancel() {
+  // STATE: any → idle (via finishSession)
+  // User cancelled, return to original page and reset
   await finishSession();
 }
 
+async function handleExtensionSuspend() {
+  await saveUiVisibility(false);
+
+  try {
+    if (chrome?.storage?.local?.clear) {
+      await new Promise((resolve) => {
+        chrome.storage.local.clear(() => {
+          resolve();
+        });
+      });
+    }
+  } catch {
+    // Ignore storage clearing errors; suspension cleanup will continue
+  }
+
+  const tabId = state.tabId;
+  if (tabId !== null && tabId !== undefined) {
+    await sendMessageWithRetry(tabId, { type: "HIDE_UI" });
+  }
+
+  await resetState();
+}
+
+async function handleActionClick(tab) {
+  if (state.status !== "awaiting_selection" || state.tabId == null) {
+    return;
+  }
+
+  const targetTabId = state.tabId;
+
+  if (!tab || tab.id !== targetTabId) {
+    try {
+      await chrome.tabs.update(targetTabId, { active: true });
+    } catch {
+      // Tab may no longer exist; ignore focus errors
+    }
+  }
+
+  await saveUiVisibility(true);
+  await sendMessageWithRetry(targetTabId, {
+    type: "SHOW_UI",
+    message: "Выберите область"
+  });
+}
+
 async function finishSession() {
+  // STATE: any → idle (via resetState)
+  // Clean up UI and navigate back to original page
   const { tabId, returnUrl } = state;
   await saveUiVisibility(false);
   if (tabId !== null && tabId !== undefined) {
     await sendMessageWithRetry(tabId, { type: "HIDE_UI" });
   }
-  await resetState();
+  await resetState();  // → idle state
   if (tabId !== null && tabId !== undefined && returnUrl) {
     try {
       await navigate(tabId, returnUrl);
@@ -187,6 +255,8 @@ async function finishSession() {
 }
 
 async function resetState() {
+  // STATE: any → idle
+  // Reset all session data to initial state
   state.status = "idle";
   state.tabId = null;
   state.returnUrl = null;
@@ -196,26 +266,32 @@ async function resetState() {
 }
 
 async function reportError(error, tabId) {
+  // STATE: any → idle (via resetState)
+  // Error occurred, show error message and reset all session data
   console.error(error);
   const message = error instanceof Error ? error.message : "Неизвестная ошибка";
   if (tabId !== null && tabId !== undefined) {
     await sendMessageWithRetry(tabId, { type: "SHOW_ERROR", message });
   }
-  state.status = "idle";
-  state.tabId = null;
-  state.returnUrl = null;
-  state.targetUrl = null;
-  state.target = null;
-  state.token = null;
+  await resetState();  // → idle state
 }
 
 async function syncUiState(tabId) {
-  if (state.status === "awaiting_selection" || isUiVisible) {
-    await sendMessageWithRetry(tabId, { 
-      type: "SHOW_UI", 
+  if (state.status === "awaiting_selection") {
+    if (!isUiVisible) {
+      await saveUiVisibility(true);
+    }
+    await sendMessageWithRetry(tabId, {
+      type: "SHOW_UI",
       message: "Выберите область"
     });
-  } 
+    return;
+  }
+
+  if (isUiVisible) {
+    await saveUiVisibility(false);
+    await sendMessageWithRetry(tabId, { type: "HIDE_UI" });
+  }
 }
 
 async function sendMessageWithRetry(tabId, message, attempts = 3) {
@@ -360,4 +436,35 @@ async function loadImage(dataUrl) {
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
+}
+
+// Expose helpers for Jest / browser-like tests without emitting real exports in production code.
+const isTestEnv =
+  typeof globalThis !== "undefined" &&
+  (
+    // Explicit test flag for browser / extension test environments
+    globalThis.__swTestEnv__ === true ||
+    // Fallback for Node-based test runners like Jest
+    (typeof globalThis.process !== "undefined" &&
+      globalThis.process.env &&
+      globalThis.process.env.NODE_ENV === "test")
+  );
+if (isTestEnv && typeof globalThis !== "undefined") {
+  globalThis.__swTestHooks__ = {
+    isAllowed,
+    clamp,
+    delay,
+    sendMessageWithRetry,
+    sendMessageOnce,
+    loadImage,
+    cropDataUrl,
+    apiUpload,
+    navigate,
+    reportError,
+    resetState,
+    state,
+    handleActionClick,
+    handleExtensionSuspend,
+    syncUiState
+  };
 }

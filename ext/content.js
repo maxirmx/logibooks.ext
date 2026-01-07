@@ -1,6 +1,9 @@
 // Copyright (C) 2025 Maxim [maxirmx] Samsonov (www.sw.consulting)
 // All rights reserved.
 // This file is a part of Logibooks techdoc helper extension 
+//
+// Content script for page-activated screenshot extension.
+// See sw.js for architecture documentation and localStorage justification. 
 
 let overlay;
 let box;
@@ -30,9 +33,13 @@ window.addEventListener("message", (event) => {
     return;
   }
 
-  // Handle activation messages forwarded to the extension
+  // Handle activation messages from the host webpage
+  // This triggers the cross-page screenshot workflow that requires localStorage persistence
   if (payload.type === "LOGIBOOKS_EXTENSION_ACTIVATE") {
-
+    // Extract and validate parameters for the screenshot workflow:
+    // - target: Upload endpoint URL where screenshot will be sent
+    // - url: Target page URL to navigate to for screenshot capture  
+    // - token: Authentication token for upload endpoint
     const target = typeof payload.target === "string" ? payload.target.trim() : "";
     const url = typeof payload.url === "string" ? payload.url.trim() : "";
     const token = typeof payload.token === "string" ? payload.token.trim() : "";
@@ -64,6 +71,10 @@ window.addEventListener("message", (event) => {
       return;
     }
 
+    // Forward to background script which will:
+    // 1. Store these parameters in local storage using Chrome API 
+    // 2. Navigate to the target URL
+    // 3. Restore UI state on the target page to show screenshot interface
     chrome.runtime.sendMessage({
       type: "PAGE_ACTIVATE",
       target,
@@ -72,8 +83,6 @@ window.addEventListener("message", (event) => {
     });
   }
 });
-
-let uiState = "idle";
 
 function togglePanel(visible) {
   if (panel) {
@@ -130,17 +139,18 @@ function ensurePanel() {
   closeButton.addEventListener("click", () => {
     // Hide locally to avoid UI being stuck if the message fails.
     togglePanel(false);
+    cleanupSelection();
 
     try {
-      chrome.runtime.sendMessage({ type: "HIDE_UI" }, () => {
+      chrome.runtime.sendMessage({ type: "UI_CANCEL" }, () => {
         if (chrome.runtime.lastError) {
           // Log the error and ensure the panel stays hidden locally.
-          console.error("Failed to send HIDE_UI message:", chrome.runtime.lastError);
+          console.error("Failed to send UI_CANCEL message:", chrome.runtime.lastError);
           togglePanel(false);
         }
       });
     } catch (error) {
-      console.error("Exception while sending HIDE_UI message:", error);
+      console.error("Exception while sending UI_CANCEL message:", error);
       togglePanel(false);
     }
   });
@@ -153,16 +163,50 @@ function ensurePanel() {
   saveButton = document.createElement("button");
   saveButton.textContent = "Сохранить";
   saveButton.type = "button";
-  saveButton.style.cssText = "padding: 6px 12px;";
+  saveButton.style.cssText = "padding: 6px 12px; cursor: pointer;";
   saveButton.addEventListener("click", () => {
     if (!selectedRect) return;
-    chrome.runtime.sendMessage({ type: "UI_SAVE", rect: selectedRect });
+    const rectToSend = selectedRect;
+    // Hide overlay and panel first so the captured tab image does not
+    // include selection UI artifacts. Use a short timeout to allow the
+    // browser to repaint before the background captures the visible tab.
+    try {
+      cleanupOverlay();
+    } catch (e) {
+      // best-effort
+    }
+    togglePanel(false);
+    // Use two animation frames to ensure the browser repaints after we
+    // removed the overlay and hid the panel. This is more reliable than
+    // a fixed short timeout which may be too short on some systems.
+    // Use guarded globalThis.requestAnimationFrame to satisfy linters
+    const raf = typeof globalThis.requestAnimationFrame === "function" ? globalThis.requestAnimationFrame : null;
+    if (raf) {
+      raf(() => {
+        raf(() => {
+          try {
+            chrome.runtime.sendMessage({ type: "UI_SAVE", rect: rectToSend });
+          } catch (err) {
+            console.error("Failed to send UI_SAVE message:", err);
+          }
+        });
+      });
+    } else {
+      // Fallback to timeout in environments without RAF
+      setTimeout(() => {
+        try {
+          chrome.runtime.sendMessage({ type: "UI_SAVE", rect: rectToSend });
+        } catch (err) {
+          console.error("Failed to send UI_SAVE message:", err);
+        }
+      }, 150);
+    }
   });
 
   cancelButton = document.createElement("button");
   cancelButton.textContent = "Отменить";
   cancelButton.type = "button";
-  cancelButton.style.cssText = "padding: 6px 12px;";
+  cancelButton.style.cssText = "padding: 6px 12px; cursor: pointer;";
   cancelButton.addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "UI_CANCEL" });
   });
@@ -170,11 +214,12 @@ function ensurePanel() {
   panel.appendChild(statusLabel);
   panel.appendChild(saveButton);
   panel.appendChild(cancelButton);
+  // Note: reselection is initiated by pressing mouse on the overlay;
+  // no explicit "reselect" button is needed.
   document.documentElement.appendChild(panel);
 }
 
 function showSelectionUI(message) {
-  uiState = "selecting";
   if (!panel) ensurePanel();
   
   statusLabel.textContent = message || "Выберите область";
@@ -185,28 +230,16 @@ function showSelectionUI(message) {
   startSelection();
 }
 
-function hideUI() {
-  uiState = "idle";
-  togglePanel(false);
-  cleanupSelection();
-}
+
 
 function showError(message) {
-  uiState = "idle";
   if (!panel) ensurePanel();
   
   statusLabel.textContent = message || "Ошибка";
   saveButton.style.display = "none";
-  cancelButton.style.display = "none";
+  cancelButton.style.display = "inline-flex";
   togglePanel(true);
   cleanupSelection();
-  
-  // Auto-hide error after 5 seconds
-  setTimeout(() => {
-    if (uiState === "idle") {
-      togglePanel(false);
-    }
-  }, 5000);
 }
 
 function cleanupSelection() {
@@ -264,6 +297,19 @@ function startSelection() {
   overlay.addEventListener("keydown", keydownHandler);
 
   mousedownHandler = (e) => {
+    // If a previous selection exists and the user presses again, drop
+    // the old selection and start a fresh selection from the new point.
+    if (selectedRect) {
+      // Remove the persistent selection visuals.
+      cleanupOverlay();
+      // Restart selection on a clean overlay in a separate tick to avoid
+      // stacking event handlers or recursively re-entering initialization.
+      setTimeout(() => {
+        startSelection();
+      }, 0);
+      return;
+    }
+
     selecting = true;
     startX = e.clientX;
     startY = e.clientY;
@@ -271,6 +317,9 @@ function startSelection() {
     box.style.top = `${startY}px`;
     box.style.width = "0px";
     box.style.height = "0px";
+    // When starting a new selection, clear previous rect and disable Save
+    selectedRect = null;
+    saveButton.disabled = true;
     e.preventDefault();
   };
 
@@ -320,10 +369,12 @@ function startSelection() {
     // Keep the overlay and selection box visible after mouseup so the user
     // can still see and confirm the selected area before saving.
     // Remove the overlay only when the user cancels or starts a new selection.
-    // Make the box visually persistent (ensure pointer-events are none so it
-    // doesn't block clicks on the panel buttons).
+    // Make the box visually persistent but allow pointer-events through the
+    // selection box so panel buttons remain clickable. Keep the overlay
+    // cursor as crosshair per user's request; panel buttons will show pointer.
     box.style.pointerEvents = "none";
-    overlay.style.cursor = "default";
+    // Ensure overlay remains crosshair (do not change to default)
+    overlay.style.cursor = "crosshair";
   };
 
   document.addEventListener("mouseup", mouseupHandler);
@@ -334,10 +385,6 @@ chrome.runtime.onMessage.addListener((msg) => {
     showSelectionUI(msg.message);
   }
 
-  if (msg?.type === "HIDE_UI") {
-    hideUI();
-  }
-
   if (msg?.type === "SHOW_ERROR") {
     showError(msg.message);
   }
@@ -345,3 +392,47 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 chrome.runtime.sendMessage({ type: "UI_READY" });
 
+// Expose internal helpers for unit testing
+const isTestEnv =
+  typeof globalThis !== "undefined" &&
+  (
+    globalThis.__CONTENT_TEST_ENV__ === true ||
+    globalThis.process?.env?.NODE_ENV === "test"
+  );
+if (isTestEnv) {
+  globalThis.__contentTestHooks__ = {
+    togglePanel,
+    ensurePanel,
+    showSelectionUI,
+    showError,
+    cleanupSelection,
+    cleanupOverlay
+  };
+
+  // Expose selectedRect accessors for tests
+  globalThis.__contentTestHooks__.getSelectedRect = () => selectedRect;
+  globalThis.__contentTestHooks__.setSelectedRect = (r) => { selectedRect = r; };
+
+  // Test helper: trigger save flow (as if user clicked Save)
+  globalThis.__contentTestHooks__.triggerSave = (rect) => {
+    if (rect) selectedRect = rect;
+    // run the same steps as saveButton click
+    const rectToSend = selectedRect;
+    try { cleanupOverlay(); } catch (e) {}
+    togglePanel(false);
+    const raf = typeof globalThis.requestAnimationFrame === "function" ? globalThis.requestAnimationFrame : null;
+    if (raf) {
+      raf(() => {
+        raf(() => {
+          try {
+            chrome.runtime.sendMessage({ type: "UI_SAVE", rect: rectToSend });
+          } catch (err) {}
+        });
+      });
+    } else {
+      setTimeout(() => {
+        try { chrome.runtime.sendMessage({ type: "UI_SAVE", rect: rectToSend }); } catch (err) {}
+      }, 150);
+    }
+  };
+}
