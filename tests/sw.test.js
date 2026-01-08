@@ -102,6 +102,7 @@ describe("Service worker helpers", () => {
 
   it("syncUiState shows UI only when awaiting selection", async () => {
     sw.state.status = "awaiting_selection";
+    sw.state.tabId = 777;
     await sw.syncUiState(777);
 
     expect(global.chrome.tabs.sendMessage).toHaveBeenCalledWith(
@@ -111,7 +112,12 @@ describe("Service worker helpers", () => {
     );
 
     global.chrome.tabs.sendMessage.mockClear();
+    await sw.syncUiState(111);
+    expect(global.chrome.tabs.sendMessage).not.toHaveBeenCalled();
+
+    global.chrome.tabs.sendMessage.mockClear();
     sw.state.status = "idle";
+    sw.state.tabId = null;
     await sw.syncUiState(777);
 
     expect(global.chrome.storage.local.set).toHaveBeenCalledWith({ isUiVisible: false });

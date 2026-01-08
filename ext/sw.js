@@ -46,6 +46,45 @@ const state = {
 };
 
 let isUiVisible = false;
+const SESSION_STORAGE_KEY = "logibooksSelectionState";
+const sessionStore = typeof chrome !== "undefined" ? chrome.storage?.session : undefined;
+
+function snapshotState() {
+  return {
+    status: state.status,
+    tabId: state.tabId,
+    returnUrl: state.returnUrl,
+    targetUrl: state.targetUrl,
+    target: state.target,
+    token: state.token
+  };
+}
+
+async function persistSessionState() {
+  if (!sessionStore?.set) return;
+  try {
+    await sessionStore.set({ [SESSION_STORAGE_KEY]: snapshotState() });
+  } catch {
+    // Ignore storage persistence errors; in-memory state remains authoritative
+  }
+}
+
+async function hydrateSessionState() {
+  if (!sessionStore?.get) return;
+  try {
+    const stored = await sessionStore.get(SESSION_STORAGE_KEY);
+    if (stored && stored[SESSION_STORAGE_KEY]) {
+      Object.assign(state, stored[SESSION_STORAGE_KEY]);
+    }
+  } catch {
+    // Ignore hydration errors; state stays at defaults
+  }
+}
+
+async function setSessionState(partial) {
+  Object.assign(state, partial);
+  await persistSessionState();
+}
 
 // Initialize UI visibility state from storage
 async function initializeUiVisibility() {
@@ -72,6 +111,13 @@ async function saveUiVisibility(visible) {
 // Initialize on service worker startup
 initializeUiVisibility();
 
+void (async () => {
+  await hydrateSessionState();
+  if (state.status === "awaiting_selection" && typeof state.tabId === "number") {
+    await syncUiState(state.tabId);
+  }
+})();
+
 
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
@@ -83,8 +129,6 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     if (state.status !== "idle") return;
     const tabId = sender.tab?.id;
     if (tabId == null) return;
-    // Move state out of "idle" immediately to avoid concurrent activations.
-    state.status = "navigating";
     void handleActivation(tabId, sender.tab?.url, msg);
   }
 
@@ -122,6 +166,25 @@ if (chrome?.action?.onClicked?.addListener) {
   });
 }
 
+if (chrome?.tabs?.onUpdated?.addListener) {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.status !== "complete") return;
+    if (state.status !== "awaiting_selection") return;
+    if (tabId !== state.tabId) return;
+    void syncUiState(tabId);
+  });
+}
+
+if (chrome?.webNavigation?.onCommitted?.addListener) {
+  chrome.webNavigation.onCommitted.addListener((details) => {
+    if (details.frameId !== 0) return;
+    if (state.status !== "awaiting_selection") return;
+    if (details.tabId !== state.tabId) return;
+    if (details.transitionType !== "reload") return;
+    void finishSession({ skipReturnNavigation: true });
+  });
+}
+
 
 
 async function handleActivation(tabId, returnUrl, payload) {
@@ -143,17 +206,20 @@ async function handleActivation(tabId, returnUrl, payload) {
     return;
   }
 
-  state.status = "navigating";
-  state.tabId = tabId;
-  state.returnUrl = returnUrl;
-  state.targetUrl = payload.url;
-  state.target = payload.target;
-  state.token = typeof payload.token === "string" ? payload.token.trim() : null;
+  const trimmedToken = typeof payload.token === "string" ? payload.token.trim() : null;
+  await setSessionState({
+    status: "navigating",
+    tabId,
+    returnUrl,
+    targetUrl: payload.url,
+    target: payload.target,
+    token: trimmedToken
+  });
 
   try {
     await navigate(tabId, payload.url);
     await saveUiVisibility(true);
-    state.status = "awaiting_selection";
+    await setSessionState({ status: "awaiting_selection" });
     await sendMessageWithRetry(tabId, { 
       type: "SHOW_UI", 
       message: "Выберите область"
@@ -167,7 +233,7 @@ async function handleSave(rect) {
   try {
     // STATE: awaiting_selection → uploading
     // User selected area, now processing and uploading screenshot
-    state.status = "uploading";
+    await setSessionState({ status: "uploading" });
     
     if (!state.tabId || !state.target) {
       throw new Error("Активная сессия не найдена");
@@ -201,6 +267,9 @@ async function handleExtensionSuspend() {
           resolve();
         });
       });
+    }
+    if (sessionStore?.clear) {
+      await sessionStore.clear();
     }
   } catch {
     // Ignore storage clearing errors; suspension cleanup will continue
@@ -236,16 +305,17 @@ async function handleActionClick(tab) {
   });
 }
 
-async function finishSession() {
+async function finishSession(options = {}) {
   // STATE: any → idle (via resetState)
   // Clean up UI and navigate back to original page
+  const { skipReturnNavigation = false } = options;
   const { tabId, returnUrl } = state;
   await saveUiVisibility(false);
   if (tabId !== null && tabId !== undefined) {
     await sendMessageWithRetry(tabId, { type: "HIDE_UI" });
   }
   await resetState();  // → idle state
-  if (tabId !== null && tabId !== undefined && returnUrl) {
+  if (!skipReturnNavigation && tabId !== null && tabId !== undefined && returnUrl) {
     try {
       await navigate(tabId, returnUrl);
     } catch {
@@ -257,12 +327,14 @@ async function finishSession() {
 async function resetState() {
   // STATE: any → idle
   // Reset all session data to initial state
-  state.status = "idle";
-  state.tabId = null;
-  state.returnUrl = null;
-  state.targetUrl = null;
-  state.target = null;
-  state.token = null;
+  await setSessionState({
+    status: "idle",
+    tabId: null,
+    returnUrl: null,
+    targetUrl: null,
+    target: null,
+    token: null
+  });
 }
 
 async function reportError(error, tabId) {
@@ -277,7 +349,12 @@ async function reportError(error, tabId) {
 }
 
 async function syncUiState(tabId) {
+  const isSessionTab = tabId === state.tabId;
+
   if (state.status === "awaiting_selection") {
+    if (!isSessionTab) {
+      return;
+    }
     if (!isUiVisible) {
       await saveUiVisibility(true);
     }

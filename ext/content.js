@@ -20,6 +20,12 @@ let saveButton;
 let cancelButton;
 let statusLabel;
 let closeButton;
+let selectionToggleButton;
+
+const SPA_NAV_EVENT = "logibooks:navigation";
+let spaHooksInstalled = false;
+
+installSpaNavigationHooks();
 
 function setSaveDisabled(disabled) {
   if (!saveButton) return;
@@ -31,6 +37,66 @@ function setSaveDisabled(disabled) {
     saveButton.style.opacity = "";
     saveButton.style.cursor = "pointer";
   }
+}
+
+function updateSelectionToggleButton() {
+  if (!selectionToggleButton) return;
+  selectionToggleButton.textContent = "Начать выбор";
+  selectionToggleButton.style.opacity = "";
+  selectionToggleButton.style.cursor = "pointer";
+}
+
+function activateSelectionMode({ forceRestart = false } = {}) {
+  startSelection({ forceRestart });
+  updateSelectionToggleButton();
+}
+
+function deactivateSelectionMode({ resetSelection = false } = {}) {
+  cleanupOverlay();
+  if (resetSelection) {
+    selectedRect = null;
+    setSaveDisabled(true);
+  }
+  updateSelectionToggleButton();
+}
+
+function requestUiSync() {
+  try {
+    chrome.runtime.sendMessage({ type: "UI_READY" });
+  } catch (error) {
+    console.error("Failed to request UI sync:", error);
+  }
+}
+
+function installSpaNavigationHooks() {
+  if (spaHooksInstalled) return;
+  spaHooksInstalled = true;
+
+  const EventCtor = typeof globalThis.Event === "function" ? globalThis.Event : null;
+  const historyRef = globalThis.history;
+
+  const dispatchNavEvent = () => {
+    if (!EventCtor) return;
+    window.dispatchEvent(new EventCtor(SPA_NAV_EVENT));
+  };
+
+  if (!historyRef) return;
+
+  ["pushState", "replaceState"].forEach((method) => {
+    const original = historyRef[method];
+    if (typeof original !== "function") return;
+    historyRef[method] = function patchedHistoryMethod(...args) {
+      const result = original.apply(this, args);
+      dispatchNavEvent();
+      return result;
+    };
+  });
+
+  window.addEventListener("popstate", dispatchNavEvent);
+  window.addEventListener("hashchange", dispatchNavEvent);
+  window.addEventListener(SPA_NAV_EVENT, () => {
+    requestUiSync();
+  });
 }
 
 // Handle messages from the page for presence queries and activation
@@ -138,7 +204,7 @@ function ensurePanel() {
   closeButton.addEventListener("click", () => {
     // Hide locally to avoid UI being stuck if the message fails.
     togglePanel(false);
-    cleanupSelection();
+    deactivateSelectionMode({ resetSelection: true });
 
     try {
       chrome.runtime.sendMessage({ type: "UI_CANCEL" }, () => {
@@ -160,13 +226,27 @@ function ensurePanel() {
   statusLabel.style.cssText = "font-size: 14px; margin-top: 4px;";
   statusLabel.textContent = "";
 
+  selectionToggleButton = document.createElement("button");
+  selectionToggleButton.type = "button";
+  selectionToggleButton.style.cssText = (
+    "padding: 0.5rem 0.8rem; border: none; border-radius: 4px; " +
+    "background-color: #1976d2; color: white; font-size: 13px; font-weight: 500; " +
+    "cursor: pointer; transition: all 0.15s; min-width: 64px; display: inline-flex; " +
+    "align-items: center; justify-content: center; text-align: center;"
+  );
+  selectionToggleButton.addEventListener("click", () => {
+    activateSelectionMode({ forceRestart: true });
+  });
+  updateSelectionToggleButton();
+
   saveButton = document.createElement("button");
   saveButton.textContent = "Сохранить";
   saveButton.type = "button";
   saveButton.style.cssText = (
     "padding: 0.5rem 0.8rem; border: none; border-radius: 4px; " +
     "background-color: #1976d2; color: white; font-size: 13px; font-weight: 500; " +
-    "cursor: pointer; transition: all 0.15s; min-width: 64px;"
+    "cursor: pointer; transition: all 0.15s; min-width: 64px; display: inline-flex; " +
+    "align-items: center; justify-content: center; text-align: center;"
   );
   saveButton.addEventListener("click", () => {
     if (!selectedRect) return;
@@ -213,14 +293,22 @@ function ensurePanel() {
   cancelButton.style.cssText = (
     "padding: 0.5rem 0.8rem; border: none; border-radius: 4px; " +
     "background-color: #6c757d; color: white; font-size: 13px; font-weight: 500; " +
-    "cursor: pointer; transition: all 0.15s; min-width: 64px;"
+    "cursor: pointer; transition: all 0.15s; min-width: 120px; display: inline-flex; " +
+    "align-items: center; justify-content: center; text-align: center;"
   );
   cancelButton.addEventListener("click", () => {
-    chrome.runtime.sendMessage({ type: "UI_CANCEL" });
+    deactivateSelectionMode({ resetSelection: true });
+    togglePanel(false);
+    try {
+      chrome.runtime.sendMessage({ type: "UI_CANCEL" });
+    } catch (error) {
+      console.error("Failed to send UI_CANCEL message:", error);
+    }
   });
 
   const actions = document.createElement("div");
-  actions.style.cssText = "display: flex; gap: 8px; align-items: center;";
+  actions.style.cssText = "display: flex; gap: 8px; align-items: center; flex-wrap: wrap;";
+  actions.appendChild(selectionToggleButton);
   actions.appendChild(saveButton);
   actions.appendChild(cancelButton);
   panel.appendChild(statusLabel);
@@ -238,7 +326,7 @@ function showSelectionUI(message) {
   cancelButton.style.display = "inline-flex";
   setSaveDisabled(!selectedRect);
   togglePanel(true);
-  startSelection();
+  activateSelectionMode({ forceRestart: true });
 }
 
 
@@ -250,12 +338,11 @@ function showError(message) {
   saveButton.style.display = "none";
   cancelButton.style.display = "inline-flex";
   togglePanel(true);
-  cleanupSelection();
+  deactivateSelectionMode({ resetSelection: true });
 }
 
 function cleanupSelection() {
-  cleanupOverlay();
-  selectedRect = null;
+  deactivateSelectionMode({ resetSelection: true });
 }
 
 function cleanupOverlay() {
@@ -273,12 +360,17 @@ function cleanupOverlay() {
   mousemoveHandler = null;
   mouseupHandler = null;
   selecting = false;
+  updateSelectionToggleButton();
 }
 
-function startSelection() {
+function startSelection({ forceRestart = false } = {}) {
+  if (forceRestart && overlay) {
+    cleanupOverlay();
+  }
   if (overlay) return;
 
   selectedRect = null;
+  setSaveDisabled(true);
 
   overlay = document.createElement("div");
   overlay.style.cssText = "position: fixed; inset: 0; z-index: 2147483646; cursor: crosshair; background: rgba(0,0,0,0.02);";
@@ -321,9 +413,6 @@ function startSelection() {
     box.style.top = `${startY}px`;
     box.style.width = "0px";
     box.style.height = "0px";
-    // When starting a new selection, clear previous rect and disable Save
-    selectedRect = null;
-    setSaveDisabled(true);
     e.preventDefault();
   };
 
@@ -382,6 +471,7 @@ function startSelection() {
   };
 
   document.addEventListener("mouseup", mouseupHandler);
+  updateSelectionToggleButton();
 }
 
 chrome.runtime.onMessage.addListener((msg) => {
@@ -394,7 +484,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 });
 
-chrome.runtime.sendMessage({ type: "UI_READY" });
+requestUiSync();
 
 // Expose internal helpers for unit testing
 const isTestEnv =

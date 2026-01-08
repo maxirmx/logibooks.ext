@@ -1,6 +1,6 @@
 {
-  "name": "logibooks-extension-tests",
-  "version": "0.2.0",
+  "name": "logibooks-techdoc-helper-tests",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
